@@ -13,30 +13,29 @@ from models_cnn import EDSR, RDN
 from models_gan import SRGAN, ESRGAN, Discriminator
 from train_cnn import train_srcnns
 from train_gan import train_srgans
-from utils import make_dirs, inference, generate_all
+from utils import make_dirs, inference
+from generate import generate_all
 
 # Reproducibility #
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-# Device Configuration #
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-GPU_NUM = 3
-device = torch.device(f'cuda:{GPU_NUM}' if torch.cuda.is_available() else 'cpu')
 
 def main(args):
+
+    # Device Configuration for Multi-GPU Environment #
+    device = torch.device(f'cuda:{args.gpu_num}' if torch.cuda.is_available() else 'cpu')
 
     # Fix Seed for Reproducibility #
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
 
     # Samples and Weights Path #
     paths = [args.samples_path, args.weights_path]
-    paths = [make_dirs(path) for path in paths]
+    for path in paths:
+        make_dirs(path)
 
     # Prepare Data Loader #
     train_div2k_loader = get_div2k_loader(sort='train',
@@ -46,7 +45,8 @@ def main(args):
                                           crop_size=args.crop_size,
                                           patch_size=args.patch_size, 
                                           patch=args.patch, 
-                                          flip=args.flip)
+                                          flip=args.flip, 
+                                          rotate=args.rotate)
 
     val_div2k_loader = get_div2k_loader(sort='val',
                                         batch_size=args.val_batch_size,
@@ -105,7 +105,7 @@ def main(args):
         disc_type=args.disc_type
         ).to(device)
 
-    if args.mode == 'train':
+    if args.phase == 'train':
         if args.model == 'edsr':
             train_srcnns(train_div2k_loader, val_div2k_loader, edsr, device, args)
 
@@ -118,48 +118,45 @@ def main(args):
         elif args.model == 'esrgan':
             train_srgans(train_div2k_loader, val_div2k_loader, esrgan, D, device, args)
 
-
-    # Configure Pre-trained Weights Paths #
-    edsr_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(edsr.__class__.__name__, args.num_epochs))
-    rdn_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(rdn.__class__.__name__, args.num_epochs))
-    srgan_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(srgan.__class__.__name__, args.num_epochs))
-    esrgan_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(esrgan.__class__.__name__, args.num_epochs))
-
-    # Load Weights #
-    edsr.load_state_dict(torch.load(edsr_weight_path))
-    rdn.load_state_dict(torch.load(rdn_weight_path))
-    srgan.load_state_dict(torch.load(srgan_weight_path))
-    esrgan.load_state_dict(torch.load(esrgan_weight_path))
-
-    if args.mode == 'inference':
+    elif args.phase == 'inference':
 
         if args.model == 'edsr':
+            edsr_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(edsr.__class__.__name__, args.num_epochs))
+            edsr.load_state_dict(torch.load(edsr_weight_path))
             inference(val_div2k_loader, edsr, args.upscale_factor, args.num_epochs, args.inference_path, device, save_combined=False)
 
         elif args.model == 'rdn':
+            rdn_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(rdn.__class__.__name__, args.num_epochs))
+            rdn.load_state_dict(torch.load(rdn_weight_path))
             inference(val_div2k_loader, rdn, args.upscale_factor, args.num_epochs, args.inference_path, device, save_combined=False)
 
         elif args.model == 'srgan':
+            srgan_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(srgan.__class__.__name__, args.num_epochs))
+            srgan.load_state_dict(torch.load(srgan_weight_path))
             inference(val_div2k_loader, srgan, args.upscale_factor, args.num_epochs, args.inference_path, device, save_combined=False)
 
         elif args.model == 'esrgan':
+            esrgan_weight_path = os.path.join(args.weights_path, '{}_Epoch_{}.pkl'.format(esrgan.__class__.__name__, args.num_epochs))
+            esrgan.load_state_dict(torch.load(esrgan_weight_path))
             inference(val_div2k_loader, esrgan, args.upscale_factor, args.num_epochs, args.inference_path, device, save_combined=False)
 
-    if args.mode == 'generate':
-        generate_all(val_div2k_loader, edsr, rdn, srgan, esrgan, device, args)
+    elif args.phase == 'generate':
+        generate_all(val_div2k_loader, device, args)
+
+    else:
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--gpu_num', type=int, default=0, help='GPU number configuration')
     parser.add_argument('--seed', type=int, default=42, help='fix seed for reproducibility')
-    parser.add_argument('--batch_size', type=int, default=4, help='mini-batch size for train')
-    parser.add_argument('--val_batch_size', type=int, default=1, help='mini-batch size for validation')
+    parser.add_argument('--phase', type=str, default='train', help='train, inference, generate', choices=['train', 'inference', 'generate'])
 
     parser.add_argument('--model', type=str, default='edsr', choices=['edsr', 'rdn', 'srgan', 'esrgan'])
-    parser.add_argument('--disc_type', type=str, default='patch', choices=['fcn', 'conv', 'patch'])
-    parser.add_argument('--init', type=str, default='he', choices=['normal', 'xavier', 'he'])
+    parser.add_argument('--disc_type', type=str, default='fcn', choices=['fcn', 'conv', 'patch'])
 
     parser.add_argument('--channels', type=int, default=3, help='in- and out- channel for models')
     parser.add_argument('--out_dim', type=int, default=1, help='output dimension for discriminator')
@@ -173,16 +170,19 @@ if __name__ == "__main__":
     parser.add_argument('--num_layers', type=int, default=8, help='the number of layers')
     parser.add_argument('--scale_ration', type=float, default=0.2, help='scale ration')
 
+    parser.add_argument('--batch_size', type=int, default=8, help='mini-batch size for train')
+    parser.add_argument('--val_batch_size', type=int, default=1, help='mini-batch size for validation')
     parser.add_argument('--image_size', type=int, default=512, help='image size')
     parser.add_argument('--crop_size', type=int, default=128, help='image crop size')
-    parser.add_argument('--patch_size', type=int, default=96, help='image patch size')
+    parser.add_argument('--patch_size', type=int, default=48, help='image patch size')
     parser.add_argument('--upscale_factor', type=int, default=4, help='upscale factor')
-    parser.add_argument('--flip', type=bool, default=True, help='flipping for data augmentation')
-    parser.add_argument('--patch', type=bool, default=True, help='making patch for data augmentation')
+    parser.add_argument('--flip', type=bool, default=True, help='flipping for data augmentation during training')
+    parser.add_argument('--patch', type=bool, default=True, help='making patch for data augmentation during training')
+    parser.add_argument('--rotate', type=bool, default=True, help='rotation for data augmentation during training')
 
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--lr_decay_rate', type=float, default=0.5, help='decay learning rate')
-    parser.add_argument('--lr_decay_every', type=int, default=100, help='decay learning rate for every default epoch')
+    parser.add_argument('--lr_decay_every', type=int, default=25, help='decay learning rate for every default epoch')
     parser.add_argument('--lr_scheduler', type=str, default='step', help='learning rate scheduler', choices=['step', 'plateau', 'cosine'])
 
     parser.add_argument('--samples_path', type=str, default='./results/samples/', help='samples path')
@@ -199,10 +199,7 @@ if __name__ == "__main__":
     parser.add_argument('--lambda_content', type=float, default=1, help='lambda for Content Loss used for ESRGAN')
     parser.add_argument('--lambda_bce', type=float, default=5e-3, help='lambda for Binary Cross Entropy Loss used for ESRGAN')
 
-    parser.add_argument('--mode', type=str, default='train', help='train, inference, generate', choices=['train', 'inference', 'generate'])
-
     args = parser.parse_args()
-
 
     torch.cuda.empty_cache()
     main(args)

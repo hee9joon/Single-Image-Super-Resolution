@@ -24,7 +24,7 @@ def train_srcnns(train_loader, val_loader, model, device, args):
 
     # Optimizers #
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.5, 0.999))
-    optimizer_scheduler = get_lr_scheduler(lr_scheduler=args.lr_scheduler, optimizer=optimizer, args=args)
+    optimizer_scheduler = get_lr_scheduler(optimizer=optimizer, args=args)
 
     # Lists #
     losses = list()

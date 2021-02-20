@@ -31,8 +31,8 @@ def train_srgans(train_loader, val_loader, generator, discriminator, device, arg
     D_optim = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(0.9, 0.999))
     G_optim = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(0.9, 0.999))
 
-    D_optim_scheduler = get_lr_scheduler(args.lr_scheduler, D_optim, args)
-    G_optim_scheduler = get_lr_scheduler(args.lr_scheduler, G_optim, args)
+    D_optim_scheduler = get_lr_scheduler(D_optim, args)
+    G_optim_scheduler = get_lr_scheduler(G_optim, args)
 
     # Lists #
     D_losses, G_losses = list(), list()

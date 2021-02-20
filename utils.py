@@ -14,13 +14,13 @@ def make_dirs(path):
         os.makedirs(path)
 
 
-def get_lr_scheduler(lr_scheduler, optimizer, args):
+def get_lr_scheduler(optimizer, args):
     """Learning Rate Scheduler"""
-    if lr_scheduler == 'step':
+    if args.lr_scheduler == 'step':
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_every, gamma=args.lr_decay_rate)
-    elif lr_scheduler == 'plateau':
+    elif args.lr_scheduler == 'plateau':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, threshold=0.01, patience=5)
-    elif lr_scheduler == 'cosine':
+    elif args.lr_scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max, eta_min=0)
     else:
         raise NotImplementedError
@@ -94,6 +94,7 @@ def sample_images(data_loader, batch_size, scale_factor, model, epoch, path, dev
 
 
 def inference(data_loader, model, upscale_factor, epoch, path, device, save_combined=True):
+    """Inference using DIV2K validation set"""
 
     # Inference Path #
     results_path = os.path.join(path, '{}_Epoch_{}'.format(model.__class__.__name__, epoch+1))
@@ -109,7 +110,7 @@ def inference(data_loader, model, upscale_factor, epoch, path, device, save_comb
     up_sampler = torch.nn.Upsample(scale_factor=upscale_factor, mode='bicubic').to(device)
 
     # Calculate Metric for Ground Truths and Generated Metric and Save Results #
-    print("Inference Results at Epoch {} using {} follows:".format(epoch+1, model.__class__.__name__))
+    print("\nInference Results at Epoch {} using {} follow:".format(epoch+1, model.__class__.__name__))
     for i, (high, low) in enumerate(data_loader):
 
         # Prepare Data #
@@ -162,49 +163,20 @@ def inference(data_loader, model, upscale_factor, epoch, path, device, save_comb
             )
 
     # Print Statistics #
-    print("PSNR Bicubic | Average {:.3f} | S.D {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
+    print("### PSNR ###")
+    print("  Bicubic | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
           .format(np.mean(PSNR_GT_values), np.std(PSNR_GT_values), np.max(PSNR_GT_values), np.min(PSNR_GT_values)))
-    print("PSNR Generated at Epoch {} | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
-          .format(epoch + 1, np.average(PSNR_Gen_values), np.std(PSNR_Gen_values), np.max(PSNR_Gen_values), np.min(PSNR_Gen_values)))
+    print("Generated | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
+          .format(np.average(PSNR_Gen_values), np.std(PSNR_Gen_values), np.max(PSNR_Gen_values), np.min(PSNR_Gen_values)))
 
-    print("MSE Bicubic | Average {:.3f} | S.D {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
+    print("### MSE ###")
+    print("  Bicubic | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
           .format(np.mean(MSE_GT_values), np.std(MSE_GT_values), np.max(MSE_GT_values), np.min(MSE_GT_values)))
-    print("MSE Generated at Epoch {} | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
-          .format(epoch + 1, np.mean(MSE_Gen_values), np.std(MSE_Gen_values), np.max(MSE_Gen_values), np.min(MSE_Gen_values)))
+    print("Generated | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
+          .format(np.mean(MSE_Gen_values), np.std(MSE_Gen_values), np.max(MSE_Gen_values), np.min(MSE_Gen_values)))
 
-    print("SSIM Bicubic | Average {:.3f} | S.D {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
+    print("### SSIM ###")
+    print("  Bicubic | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}"
           .format(np.mean(SSIM_GT_values), np.std(SSIM_GT_values), np.max(SSIM_GT_values), np.min(SSIM_GT_values)))
-    print("SSIM Generated at Epoch {} | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}\n"
-          .format(epoch + 1, np.mean(SSIM_Gen_values), np.std(SSIM_Gen_values), np.max(SSIM_Gen_values), np.min(SSIM_Gen_values)))
-
-
-def generate_all(val_loader, edsr, rdn, srgan, esrgan, device, args):
-
-    # Single Results Path #
-    if not os.path.exists(args.single_results_path):
-        os.makedirs(args.single_results_path)
-
-    # Up-sampling Network #
-    up_sampler = torch.nn.Upsample(scale_factor=args.upscale_factor, mode='bicubic').to(device)
-
-    for i, (high, low) in enumerate(val_loader):
-
-        # Prepare Data #
-        high = high.to(device)
-        low = low.to(device)
-
-        # Forward Data to Networks #
-        with torch.no_grad():
-            bicubic = up_sampler(low.detach())
-            generated_edsr = edsr(low.detach())
-            generated_rdn = rdn(low.detach())
-            generated_srgan = srgan(low.detach())
-            generated_esrgan = esrgan(low.detach())
-
-        # Normalize and Save Images #
-        save_image(denorm(high.data), os.path.join(args.single_results_path, 'Inference_Samples_TARGET_%03d.png' % (i+1)))
-        save_image(denorm(bicubic.data), os.path.join(args.single_results_path, 'Inference_Samples_BICUBIC_%03d.png' % (i+1)))
-        save_image(denorm(generated_edsr.data), os.path.join(args.single_results_path, 'Inference_Samples_%s_%03d.png' % (edsr.__class__.__name__, i+1)))
-        save_image(denorm(generated_rdn.data), os.path.join(args.single_results_path, 'Inference_Samples_%s_%03d.png' % (rdn.__class__.__name__, i+1)))
-        save_image(denorm(generated_srgan.data), os.path.join(args.single_results_path, 'Inference_Samples_%s_%03d.png' % (srgan.__class__.__name__, i+1)))
-        save_image(denorm(generated_esrgan.data), os.path.join(args.single_results_path, 'Inference_Samples_%s_%03d.png' % (esrgan.__class__.__name__, i+1)))
+    print("Generated | Average {:.3f} | SD {:.3f} | Maximum {:.3f} | Minimum {:.3f}\n"
+          .format(np.mean(SSIM_Gen_values), np.std(SSIM_Gen_values), np.max(SSIM_Gen_values), np.min(SSIM_Gen_values)))
